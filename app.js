@@ -477,7 +477,7 @@ async function processAllFiles(shopifyFile, sageCustomersFile, sageTrackingFile,
 
   // === PREVIEW + AUTO DOWNLOAD (for now) ===
   previewMatrixifyRows(matrixifyRows);
-  generateAndDownloadCSV(matrixifyRows);   // remove this line later when you have UI buttons
+  // generateAndDownloadCSV(matrixifyRows);   // remove this line later when you have UI buttons
 
   return {
     shopifyOpenOrders,
@@ -490,6 +490,52 @@ async function processAllFiles(shopifyFile, sageCustomersFile, sageTrackingFile,
 
 }
 
+
+
+// ====================== UI GLUE ======================
+async function processAll() {
+  const statusEl = document.getElementById('status');
+  const previewEl = document.getElementById('preview');
+
+  statusEl.textContent = '⏳ Reading files...';
+
+  const shopifyFile = document.getElementById('shopifyFile').files[0];
+  const sageLinesFile = document.getElementById('sageLinesFile').files[0];
+  const sageTrackingFile = document.getElementById('sageTrackingFile').files[0];
+  const sageCustomersFile = document.getElementById('sageCustomersFile').files[0];
+
+  if (!shopifyFile || !sageLinesFile || !sageTrackingFile || !sageCustomersFile) {
+    statusEl.textContent = '❌ Please upload all 4 files';
+    return;
+  }
+
+  try {
+    const result = await processAllFiles(
+      shopifyFile,
+      sageCustomersFile,
+      sageTrackingFile,
+      sageLinesFile
+    );
+
+    statusEl.innerHTML = `
+      ✅ Done!<br>
+      • Updates: ${Object.keys(result.matchingResult.importableSageOrdersThatAlreadyExistInShopify).length}<br>
+      • New orders: ${Object.keys(result.matchingResult.importableNewSageOrders).length}<br>
+      • To close: ${result.matrixifyRows.filter(r => r["Closed At"]).length}
+    `;
+
+    previewMatrixifyRows(result.matrixifyRows, 8); // shows in console
+
+    // Auto-download (you can remove this once you're happy)
+    generateAndDownloadCSV(result.matrixifyRows);
+
+    previewEl.textContent = `Generated ${result.matrixifyRows.length} rows for Matrixify.\nCheck console for preview. File downloaded.`;
+
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = `❌ Error: ${err.message}`;
+  }
+}
 
 
 

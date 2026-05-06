@@ -2,33 +2,40 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Stellar Sage → Shopify Sync</title>
+    <title>Stellar Sage → Shopify Sync Tool</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
-    <style> /* simple tailwind or plain CSS later */ </style>
+    <script src="app.js"></script>   <!-- THIS IS THE KEY LINE -->
+    <style>
+      body { font-family: system-ui, sans-serif; padding: 20px; }
+      input { margin: 8px 0; }
+      button { padding: 12px 20px; font-size: 16px; margin: 20px 0; }
+      #status { margin: 15px 0; font-weight: bold; }
+      pre { background: #f4f4f4; padding: 15px; overflow: auto; max-height: 400px; }
+    </style>
 </head>
 <body>
 <h1>Stellar Technical Sage ↔ Shopify Sync Tool</h1>
 
 <div>
-    <h2>1. Upload Shopify Open Orders Export</h2>
+    <h2>1. Shopify Open Orders Export</h2>
     <input type="file" id="shopifyFile" accept=".csv">
 </div>
 <div>
-    <h2>2. Upload Sage - Line Items By Promise Date.csv</h2>
+    <h2>2. Sage - Line Items By Promise Date.csv</h2>
     <input type="file" id="sageLinesFile" accept=".csv">
 </div>
 <div>
-    <h2>3. Upload Sage - Tracking Numbers.csv</h2>
+    <h2>3. Sage - Tracking Numbers.csv</h2>
     <input type="file" id="sageTrackingFile" accept=".csv">
 </div>
 <div>
-    <h2>4. Upload Sage - Customer Contacts.csv</h2>
+    <h2>4. Sage - Customer Contacts.csv</h2>
     <input type="file" id="sageCustomersFile" accept=".csv">
 </div>
 
-<button onclick="processAll()">Process & Generate Matrixify CSV</button>
+<button onclick="processAll()">🚀 Process Files & Generate Matrixify CSV</button>
 
+<div id="status"></div>
 <pre id="preview"></pre>
 </body>
 </html>
