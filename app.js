@@ -71,6 +71,7 @@ function buildSageCustomers(customerRows) {
     sageCustomers[customerId] = {
       email,
       sageCustomerName: row['Name'] || '',
+      sageCustomerPhone: row['Telephone'] || '',
       origin
     };
   }
@@ -116,6 +117,8 @@ function buildSageOrders(lineItemsRows, sageCustomers, trackingNumbers) {
       sageOrders[soId] = {
         sageCustomerNumber: custNumber,
         sageCustomerEmail: custInfo.email || '',
+        sageCustomerName: custInfo.sageCustomerName || '',
+        sageCustomerPhone: custInfo.sageCustomerPhone || '',
         orderDate: row['Order Date']?.trim() || '',
         productLineItems: [],
         promiseDates: [],
@@ -231,7 +234,7 @@ function buildMatchingMaps(shopifyOpenOrders, sageOrders) {
         }
 
         if (lineCountMatch && detailsMatch) {
-          importableSageOrdersThatAlreadyExistInShopify[soId] = { ...sageOrder, shopifyOrderId: shopifyId };
+          importableSageOrdersThatAlreadyExistInShopify[soId] = { ...sageOrder, shopifyOrderId: shopifyId, shopifyOrderName: shopifyOrder.shopifyOrderName };
 
           // Also update the map so we have the Shopify ID for later import
           sageOrdersAlreadyInShopifyMap[soId] = shopifyId;
@@ -259,6 +262,136 @@ function buildMatchingMaps(shopifyOpenOrders, sageOrders) {
 }
 
 
+// ====================== MATRIXIFY IMPORT CSV GENERATOR ======================
+function generateMatrixifyImportCSV(
+  importableSageOrdersThatAlreadyExistInShopify,
+  importableNewSageOrders,
+  sageOrdersAlreadyInShopifyMap,
+  shopifyOpenOrders
+) {
+  const importRows = [];
+  const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+
+  // Helper to format date for Shopify
+  function formatShopifyDate(dateStr) {
+    if (!dateStr) return '';
+    return normalizeDate(dateStr); // reuse our normalizer → YYYY-MM-DD
+  }
+
+  // 1. EXISTING ORDERS - Just update metafields (MERGE)
+  Object.entries(importableSageOrdersThatAlreadyExistInShopify).forEach(([soId, order]) => {
+    importRows.push({
+      "ID": order.shopifyOrderId || '',
+      "Name": order.shopifyOrderName || '',
+      "Command": "MERGE",
+      "Processed At": formatShopifyDate(order.orderDate),
+      "Closed At": "",
+      "Source": "",
+      "Customer:Email": order.sageCustomerEmail || '',
+      "Customer: Phone": "",
+      "Customer: First Name": "",
+      "Customer: Last Name": "",
+      "Line: Type": "",
+      "Line: Command": "",
+      "Line: Name": "",
+      "Line: SKU": "",
+      "Line: Quantity": "",
+      "Line: Price": "",
+      "Metafield: custom.sage_order_number": soId,
+      "Metafield: custom.promise_dates": JSON.stringify(order.promiseDates || []),
+      "Metafield: custom.tracking_numbers": JSON.stringify(order.trackingNumbers || [])
+    });
+  });
+
+  // 2. NEW SAGE ORDERS - Full order creation with line items
+  Object.entries(importableNewSageOrders).forEach(([soId, order]) => {
+    const firstNameParts = (order.sageCustomerName || '').trim().split(' ');
+    const firstName = firstNameParts[0] || '';
+    const lastName = firstNameParts.slice(1).join(' ') || '';
+
+    // Create one row per line item
+    order.productLineItems.forEach((lineItem, index) => {
+      const row = {
+        "ID": "",                                    // blank for new orders
+        "Name": `S ${soId}`,                         // Sage-origin prefix
+        "Command": "MERGE",
+        "Processed At": formatShopifyDate(order.orderDate),
+        "Closed At": "",
+        "Source": "Sage-origin order",
+        "Customer:Email": order.sageCustomerEmail || '',
+        "Customer: Phone": order.sageCustomerPhone || '',
+        "Customer: First Name": firstName,
+        "Customer: Last Name": lastName,
+        "Line: Type": "Line Item",
+        "Line: Command": "DEFAULT",
+        "Line: Name": lineItem.productName || '',
+        "Line: SKU": lineItem.sku || '',
+        "Line: Quantity": lineItem.quantity || '',
+        "Line: Price": lineItem.unitPrice || '',
+        "Metafield: custom.sage_order_customer_number": order.sageCustomerNumber || '',
+        "Metafield: custom.sage_order_number": soId,
+        "Metafield: custom.promise_dates": JSON.stringify(order.promiseDates || []),
+        "Metafield: custom.tracking_numbers": JSON.stringify(order.trackingNumbers || [])
+      };
+
+      // Only put customer info on the first line item (Matrixify best practice)
+      if (index > 0) {
+        row["Customer:Email"] = "";
+        row["Customer: Phone"] = "";
+        row["Customer: First Name"] = "";
+        row["Customer: Last Name"] = "";
+      }
+
+      importRows.push(row);
+    });
+  });
+
+  // 3. CLOSED ORDERS (exist in Shopify but no longer in Sage)
+  const closedOrders = [];
+
+  Object.entries(sageOrdersAlreadyInShopifyMap).forEach(([sageSoId, shopifyId]) => {
+    // If it's NOT in the "already exist" bucket AND NOT in the "new" bucket → it should be closed
+    if (!importableSageOrdersThatAlreadyExistInShopify[sageSoId] &&
+      !importableNewSageOrders[sageSoId]) {
+
+      const shopifyOrder = shopifyOpenOrders[shopifyId];
+      if (shopifyOrder) {
+        closedOrders.push({
+          "ID": shopifyId,
+          "Name": shopifyOrder.shopifyOrderName || '',
+          "Command": "MERGE",
+          "Processed At": "",
+          "Closed At": today,                    // This archives the order
+          "Source": "",
+          "Customer:Email": "",
+          "Customer: Phone": "",
+          "Customer: First Name": "",
+          "Customer: Last Name": "",
+          "Line: Type": "",
+          "Line: Command": "",
+          "Line: Name": "",
+          "Line: SKU": "",
+          "Line: Quantity": "",
+          "Line: Price": "",
+          "Metafield: custom.sage_order_number": "",
+          "Metafield: custom.promise_dates": "",
+          "Metafield: custom.tracking_numbers": ""
+        });
+      }
+    }
+  });
+
+  importRows.push(...closedOrders);
+
+  console.log(`✅ Matrixify CSV generated:`);
+  console.log(`   Updates to existing orders: ${Object.keys(importableSageOrdersThatAlreadyExistInShopify).length}`);
+  console.log(`   New Sage orders: ${Object.keys(importableNewSageOrders).length}`);
+  console.log(`   Orders to close in Shopify: ${closedOrders.length}`);
+
+  return importRows;
+}
+
+
 
 // ====================== MAIN PROCESSOR ======================
 async function processAllFiles(shopifyFile, sageCustomersFile, sageTrackingFile, sageLinesFile) {
@@ -282,13 +415,31 @@ async function processAllFiles(shopifyFile, sageCustomersFile, sageTrackingFile,
   console.log(`Sage Customers: ${Object.keys(sageCustomersMap).length}`);
   console.log(`Sage Orders: ${Object.keys(sageOrders).length}`);
 
-  // Return everything so you can use it later
+
+  // === MATCHING ===
+  const matchingResult = buildMatchingMaps(shopifyOpenOrders, sageOrders);
+
+
+  // === GENERATE MATRIXIFY IMPORT ===
+  const matrixifyRows = generateMatrixifyImportCSV(
+    matchingResult.importableSageOrdersThatAlreadyExistInShopify,
+    matchingResult.importableNewSageOrders,
+    matchingResult.sageOrdersAlreadyInShopifyMap,
+    shopifyOpenOrders
+  );
+
+
   return {
     shopifyOpenOrders,
     sageCustomers: sageCustomersMap,
     trackingNumbers: trackingMap,
-    sageOrders
+    sageOrders,
+    matchingResult,
+    matrixifyRows
   };
+
+
+
 }
 
 
