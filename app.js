@@ -198,7 +198,7 @@ function buildMatchingMaps(shopifyOpenOrders, sageOrders) {
 
     // PRIMARY MATCH: Already has metaSageOrderNumber in Shopify
     if (sageOrdersAlreadyInShopifyMap[soId]) {
-      importableSageOrdersThatAlreadyExistInShopify[soId] = sageOrder;
+      importableSageOrdersThatAlreadyExistInShopify[soId] = { ... sageOrder, shopifyOrderId: sageOrdersAlreadyInShopifyMap[soId] };
       return;
     }
 
@@ -283,6 +283,7 @@ function generateMatrixifyImportCSV(
     importRows.push({
       "ID": order.shopifyOrderId || '',
       "Name": order.shopifyOrderName || '',
+      "Number": '',
       "Command": "MERGE",
       "Processed At": formatShopifyDate(order.orderDate),
       "Closed At": "",
@@ -314,6 +315,7 @@ function generateMatrixifyImportCSV(
       const row = {
         "ID": "",                                    // blank for new orders
         "Name": `S ${soId}`,                         // Sage-origin prefix
+        "Number": `S ${soId}`,                       // unique identifier for Matrixify (to group orders)
         "Command": "MERGE",
         "Processed At": formatShopifyDate(order.orderDate),
         "Closed At": "",
@@ -359,6 +361,7 @@ function generateMatrixifyImportCSV(
         closedOrders.push({
           "ID": shopifyId,
           "Name": shopifyOrder.shopifyOrderName || '',
+          "Number": '',
           "Command": "MERGE",
           "Processed At": "",
           "Closed At": today,                    // This archives the order
