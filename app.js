@@ -492,12 +492,17 @@ async function processAllFiles(shopifyFile, sageCustomersFile, sageTrackingFile,
 
 
 
-// ====================== UI GLUE ======================
+// ====================== UI GLUE + ENHANCEMENTS ======================
+let lastMatrixifyRows = [];
+
 async function processAll() {
   const statusEl = document.getElementById('status');
   const previewEl = document.getElementById('preview');
+  const processBtn = document.getElementById('processBtn');
+  const downloadBtn = document.getElementById('downloadBtn');
 
-  statusEl.textContent = '⏳ Reading files...';
+  processBtn.disabled = true;
+  statusEl.innerHTML = '<span class="spinner"></span> Processing files...';
 
   const shopifyFile = document.getElementById('shopifyFile').files[0];
   const sageLinesFile = document.getElementById('sageLinesFile').files[0];
@@ -505,7 +510,9 @@ async function processAll() {
   const sageCustomersFile = document.getElementById('sageCustomersFile').files[0];
 
   if (!shopifyFile || !sageLinesFile || !sageTrackingFile || !sageCustomersFile) {
+    statusEl.className = 'error';
     statusEl.textContent = '❌ Please upload all 4 files';
+    processBtn.disabled = false;
     return;
   }
 
@@ -517,25 +524,38 @@ async function processAll() {
       sageLinesFile
     );
 
+    lastMatrixifyRows = result.matrixifyRows;
+
+    statusEl.className = 'success';
     statusEl.innerHTML = `
-      ✅ Done!<br>
-      • Updates: ${Object.keys(result.matchingResult.importableSageOrdersThatAlreadyExistInShopify).length}<br>
-      • New orders: ${Object.keys(result.matchingResult.importableNewSageOrders).length}<br>
-      • To close: ${result.matrixifyRows.filter(r => r["Closed At"]).length}
+      ✅ Processing Complete!<br>
+      • Updates to existing orders: ${Object.keys(result.matchingResult.importableSageOrdersThatAlreadyExistInShopify).length}<br>
+      • New Sage orders: ${Object.keys(result.matchingResult.importableNewSageOrders).length}<br>
+      • Orders closed in Shopify: ${result.matrixifyRows.filter(r => r["Closed At"]).length}
     `;
 
-    previewMatrixifyRows(result.matrixifyRows, 8); // shows in console
-
-    // Auto-download (you can remove this once you're happy)
+    previewMatrixifyRows(result.matrixifyRows, 8);
     generateAndDownloadCSV(result.matrixifyRows);
 
-    previewEl.textContent = `Generated ${result.matrixifyRows.length} rows for Matrixify.\nCheck console for preview. File downloaded.`;
+    downloadBtn.style.display = 'inline-block';
+
+    previewEl.textContent = `Generated ${result.matrixifyRows.length} rows.\nFile downloaded automatically.`;
 
   } catch (err) {
     console.error(err);
+    statusEl.className = 'error';
     statusEl.textContent = `❌ Error: ${err.message}`;
+  } finally {
+    processBtn.disabled = false;
   }
 }
 
+function downloadAgain() {
+  if (lastMatrixifyRows && lastMatrixifyRows.length > 0) {
+    generateAndDownloadCSV(lastMatrixifyRows);
+  } else {
+    alert("No file to download yet. Please process files first.");
+  }
+}
 
 

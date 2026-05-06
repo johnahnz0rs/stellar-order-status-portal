@@ -2,40 +2,114 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Stellar Sage → Shopify Sync Tool</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stellar Technical • Sage → Shopify Sync</title>
+    <link rel="icon" type="image/png" href="favicon.png">
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
-    <script src="app.js"></script>   <!-- THIS IS THE KEY LINE -->
+    <script src="app.js"></script>
     <style>
-      body { font-family: system-ui, sans-serif; padding: 20px; }
-      input { margin: 8px 0; }
-      button { padding: 12px 20px; font-size: 16px; margin: 20px 0; }
-      #status { margin: 15px 0; font-weight: bold; }
-      pre { background: #f4f4f4; padding: 15px; overflow: auto; max-height: 400px; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        max-width: 900px;
+        margin: 40px auto;
+        padding: 20px;
+        line-height: 1.6;
+      }
+      h1 { color: #1a1a1a; }
+      .card {
+        background: #f9f9f9;
+        border-radius: 8px;
+        padding: 20px;
+        margin: 15px 0;
+        border: 1px solid #ddd;
+      }
+      input[type="file"] { margin: 8px 0; padding: 8px; }
+      button {
+        background: #0066cc;
+        color: white;
+        padding: 14px 28px;
+        font-size: 16px;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        margin: 10px 5px;
+      }
+      button:hover { background: #0055aa; }
+      button:disabled { background: #999; cursor: not-allowed; }
+      #status {
+        padding: 12px;
+        border-radius: 6px;
+        margin: 15px 0;
+        font-weight: 500;
+      }
+      .success { background: #d4edda; color: #155724; }
+      .error { background: #f8d7da; color: #721c24; }
+      pre {
+        background: #f4f4f4;
+        padding: 15px;
+        border-radius: 6px;
+        overflow: auto;
+        max-height: 400px;
+      }
+      .instructions {
+        background: #e3f2fd;
+        padding: 15px;
+        border-radius: 6px;
+        margin: 20px 0;
+      }
+      .spinner {
+        display: inline-block;
+        width: 20px;
+        height: 20px;
+        border: 3px solid #f3f3f3;
+        border-top: 3px solid #0066cc;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin-right: 8px;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
-<h1>Stellar Technical Sage ↔ Shopify Sync Tool</h1>
+<h1>Stellar Technical • Sage ↔ Shopify Sync Tool</h1>
+<p><strong>For Beverly</strong> — Upload the 4 exports below to generate a Matrixify-ready file.</p>
 
-<div>
+<div class="instructions">
+    <strong>How to use:</strong><br>
+    1. Export "Open Orders" from Shopify (Matrixify)<br>
+    2. Export the 3 Sage reports<br>
+    3. Upload all 4 files → Click Process
+</div>
+
+<div class="card">
     <h2>1. Shopify Open Orders Export</h2>
     <input type="file" id="shopifyFile" accept=".csv">
 </div>
-<div>
+
+<div class="card">
     <h2>2. Sage - Line Items By Promise Date.csv</h2>
     <input type="file" id="sageLinesFile" accept=".csv">
 </div>
-<div>
+
+<div class="card">
     <h2>3. Sage - Tracking Numbers.csv</h2>
     <input type="file" id="sageTrackingFile" accept=".csv">
 </div>
-<div>
+
+<div class="card">
     <h2>4. Sage - Customer Contacts.csv</h2>
     <input type="file" id="sageCustomersFile" accept=".csv">
 </div>
 
-<button onclick="processAll()">🚀 Process Files & Generate Matrixify CSV</button>
+<button id="processBtn" onclick="processAll()">🚀 Process Files & Generate Matrixify CSV</button>
+<button id="downloadBtn" onclick="downloadAgain()" style="display:none;">⬇️ Download CSV Again</button>
 
 <div id="status"></div>
 <pre id="preview"></pre>
+
+<p style="margin-top: 30px; color: #666; font-size: 0.9em;">
+    Tool built for Stellar Technical • All processing happens in your browser (private & secure)
+</p>
 </body>
 </html>
