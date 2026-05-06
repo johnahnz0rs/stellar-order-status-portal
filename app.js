@@ -148,16 +148,29 @@ function buildSageOrders(lineItemsRows, sageCustomers, trackingNumbers) {
 // ====================== MATCHING LOGIC ======================
 function normalizeDate(dateStr) {
   if (!dateStr) return '';
-  // Handle both Shopify (with time) and Sage (MM/DD/YYYY) formats
-  const cleaned = dateStr.trim().split(' ')[0];           // remove time if present
-  const parts = cleaned.split(/[-/]/);                    // handle - or /
-  if (parts.length === 3) {
-    const [m, d, y] = parts.length === 3 && parts[0].length === 2
-      ? parts.map(Number)
-      : [parts[1], parts[2], parts[0]].map(Number);     // try YYYY-MM-DD too
-    return `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+
+  // Remove time portion and any timezone
+  const cleaned = dateStr.trim().split(' ')[0];
+
+  // Split on either - or / and remove empty parts
+  let parts = cleaned.split(/[-/]/).filter(p => p.length > 0);
+
+  if (parts.length !== 3) {
+    return cleaned; // fallback
   }
-  return cleaned;
+
+  let year, month, day;
+
+  // Shopify style: starts with 4-digit year (YYYY-MM-DD)
+  if (parts[0].length === 4) {
+    [year, month, day] = parts.map(Number);
+  }
+  // Sage style: MM/DD/YYYY (most common case)
+  else {
+    [month, day, year] = parts.map(Number);
+  }
+
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
 function buildMatchingMaps(shopifyOpenOrders, sageOrders) {
@@ -218,7 +231,7 @@ function buildMatchingMaps(shopifyOpenOrders, sageOrders) {
         }
 
         if (lineCountMatch && detailsMatch) {
-          importableSageOrdersThatAlreadyExistInShopify[soId] = sageOrder;
+          importableSageOrdersThatAlreadyExistInShopify[soId] = { ...sageOrder, shopifyOrderId: shopifyId };
 
           // Also update the map so we have the Shopify ID for later import
           sageOrdersAlreadyInShopifyMap[soId] = shopifyId;
