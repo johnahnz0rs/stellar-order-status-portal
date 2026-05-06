@@ -392,6 +392,53 @@ function generateMatrixifyImportCSV(
 }
 
 
+// ====================== DOWNLOAD & PREVIEW HELPERS ======================
+
+function generateAndDownloadCSV(matrixifyRows) {
+  if (!matrixifyRows || matrixifyRows.length === 0) {
+    console.error("No rows to export");
+    return;
+  }
+
+  // Convert to CSV using PapaParse
+  const csvContent = Papa.unparse(matrixifyRows, {
+    delimiter: ",",
+    quoteChar: '"',
+    escapeChar: '"',
+    header: true
+  });
+
+  // Create blob and trigger download
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const fileName = `Stellar_Orders_Import_${new Date().toISOString().slice(0,10)}.csv`;
+
+  // Modern way (works in all current browsers)
+  const link = document.createElement('a');
+  const url = URL.createObjectURL(blob);
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+
+  console.log(`✅ Downloaded ${matrixifyRows.length} rows as ${fileName}`);
+  return csvContent; // also return string if you want to preview
+}
+
+function previewMatrixifyRows(matrixifyRows, maxRows = 10) {
+  console.log(`\n=== MATRIXIFY PREVIEW (first ${maxRows} rows) ===`);
+  const preview = matrixifyRows.slice(0, maxRows);
+  console.table(preview);
+
+  // Optional: also log summary
+  const updates = matrixifyRows.filter(r => r["ID"] && r["Command"] === "MERGE").length;
+  const news = matrixifyRows.filter(r => !r["ID"] && r["Line: Type"] === "Line Item").length;
+  const closes = matrixifyRows.filter(r => r["Closed At"]).length;
+
+  console.log(`Summary: ${updates} updates | ${news} new orders | ${closes} closes`);
+}
+
 
 // ====================== MAIN PROCESSOR ======================
 async function processAllFiles(shopifyFile, sageCustomersFile, sageTrackingFile, sageLinesFile) {
@@ -428,6 +475,9 @@ async function processAllFiles(shopifyFile, sageCustomersFile, sageTrackingFile,
     shopifyOpenOrders
   );
 
+  // === PREVIEW + AUTO DOWNLOAD (for now) ===
+  previewMatrixifyRows(matrixifyRows);
+  generateAndDownloadCSV(matrixifyRows);   // remove this line later when you have UI buttons
 
   return {
     shopifyOpenOrders,
@@ -437,8 +487,6 @@ async function processAllFiles(shopifyFile, sageCustomersFile, sageTrackingFile,
     matchingResult,
     matrixifyRows
   };
-
-
 
 }
 
