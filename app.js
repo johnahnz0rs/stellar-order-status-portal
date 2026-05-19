@@ -16,7 +16,7 @@ function buildShopifyOpenOrders(shopifyRows) {
   const shopifyOpenOrders = {};
 
   for (const row of shopifyRows) {
-    const id = row['ID'];
+    const id = parseInt(row['ID']);
     if (!id) continue;
 
     if (!shopifyOpenOrders[id]) {
@@ -50,7 +50,7 @@ function buildShopifyOpenOrders(shopifyRows) {
   Object.values(shopifyOpenOrders).forEach(order => {
     order.totalOfLineItems = order.lineItems.reduce((sum, item) => sum + item.lineTotal, 0);
   });
-
+  console.log('*** these are the shopify open orders ***', shopifyOpenOrders);
   return shopifyOpenOrders;
 }
 
@@ -59,7 +59,7 @@ function buildSageCustomers(customerRows) {
   const sageCustomers = {};
 
   for (const row of customerRows) {
-    const customerId = row['Customer']?.trim();
+    const customerId = parseInt(row['Customer']?.trim());
     if (!customerId) continue;
 
     const email = (row['E-mail Address'] || '').trim();
@@ -84,7 +84,7 @@ function buildTrackingNumbers(trackingRows) {
   const trackingNumbers = {};
 
   for (const row of trackingRows) {
-    const soNumber = row['Sales Order Number']?.trim();
+    const soNumber = parseInt(row['Sales Order Number']?.trim());
     if (!soNumber) continue;
 
     if (!trackingNumbers[soNumber]) {
@@ -98,7 +98,7 @@ function buildTrackingNumbers(trackingRows) {
       shipVia: row['Ship Via']?.trim() || ''
     });
   }
-
+  console.log('*** these are the tracking numbers ***', trackingNumbers);
   return trackingNumbers;
 }
 
@@ -107,7 +107,7 @@ function buildSageOrders(lineItemsRows, sageCustomers, trackingNumbers) {
   const sageOrders = {};
 
   for (const row of lineItemsRows) {
-    const soId = row['Sales Order']?.trim();
+    const soId = parseInt(row['Sales Order']?.trim());
     if (!soId) continue;
 
     if (!sageOrders[soId]) {
@@ -145,6 +145,7 @@ function buildSageOrders(lineItemsRows, sageCustomers, trackingNumbers) {
     });
   }
 
+  console.log('*** these are the sage orders ***', sageOrders);
   return sageOrders;
 }
 
@@ -212,10 +213,14 @@ function buildMatchingMaps(shopifyOpenOrders, sageOrders) {
       const shopifyDateNorm = normalizeDate(shopifyOrder.processedAt);
 
       // Condition A + B (email + date)
-      if (shopifyEmail && sageEmail && shopifyEmail === sageEmail &&
-        shopifyDateNorm && sageOrderDateNorm && shopifyDateNorm === sageOrderDateNorm) {
+      if (
+        shopifyEmail && sageEmail &&
+        shopifyEmail === sageEmail &&
+        shopifyDateNorm && sageOrderDateNorm &&
+        shopifyDateNorm === sageOrderDateNorm
+      ) {
 
-        // Condition C (optional but recommended) - Line item sanity check
+        // Condition C (line item sanity check)
         const lineCountMatch = shopifyOrder.lineItems.length === sageOrder.productLineItems.length;
 
         let detailsMatch = true;
