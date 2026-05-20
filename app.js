@@ -234,6 +234,7 @@ function buildMatchingMaps(shopifyOpenOrders, sageOrders) {
     // PRIMARY MATCH - metafield sage order number
     if (sageOrdersAlreadyInShopifyMap[soId]) {
       importableSageOrdersThatAlreadyExistInShopify[soId] = sageOrder;
+      importableSageOrdersThatAlreadyExistInShopify[soId].shopifyOrderId = sageOrdersAlreadyInShopifyMap[soId];
       return;
     }
 
