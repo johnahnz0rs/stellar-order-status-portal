@@ -33,7 +33,7 @@ function buildShopifyOpenOrders(shopifyRows) {
 
     const order = shopifyOpenOrders[id];
 
-    // Only Line Items
+    // Only Line Items; we don't need fulfillments, payments here
     if (row['Line: Type'] === 'Line Item') {
       const line = {
         lineName: row['Line: Name'] || '',
@@ -50,7 +50,7 @@ function buildShopifyOpenOrders(shopifyRows) {
   Object.values(shopifyOpenOrders).forEach(order => {
     order.totalOfLineItems = order.lineItems.reduce((sum, item) => sum + item.lineTotal, 0);
   });
-  console.log('*** these are the shopify open orders ***', shopifyOpenOrders);
+  // console.log('*** these are the shopify open orders ***', shopifyOpenOrders);
   return shopifyOpenOrders;
 }
 
@@ -64,7 +64,7 @@ function buildSageCustomers(customerRows) {
 
     const email = (row['E-mail Address'] || '').trim();
 
-    // Origin logic
+    // Origin logic: Sage or Shopify
     const hasLetters = /[a-zA-Z]/.test(customerId);
     const origin = hasLetters ? 'sage' : 'shopify';
 
@@ -145,7 +145,7 @@ function buildSageOrders(lineItemsRows, sageCustomers, trackingNumbers) {
     });
   }
 
-  console.log('*** these are the sage orders ***', sageOrders);
+  // console.log('*** these are the sage orders ***', sageOrders);
   return sageOrders;
 }
 
@@ -153,58 +153,91 @@ function buildSageOrders(lineItemsRows, sageCustomers, trackingNumbers) {
 function normalizeDate(dateStr) {
   if (!dateStr) return '';
 
-  // Remove time portion and any timezone
-  const cleaned = dateStr.trim().split(' ')[0];
+  const cleaned = dateStr.toString().trim();
 
-  // Split on either - or / and remove empty parts
-  let parts = cleaned.split(/[-/]/).filter(p => p.length > 0);
+  // Try direct YYYY-MM-DD or MM/DD/YYYY patterns first
+  let match = cleaned.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/) ||
+    cleaned.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
 
-  if (parts.length !== 3) {
-    return cleaned; // fallback
+  if (match) {
+    let [_, y1, m1, d1] = match.map(Number);
+    // Swap if MM/DD/YYYY
+    if (y1 > 31) { // year first
+      [y1, m1, d1] = [y1, m1, d1];
+    } else {
+      [m1, d1, y1] = [y1, m1, d1]; // assume MM/DD/YYYY
+    }
+    return `${y1}-${String(m1).padStart(2, '0')}-${String(d1).padStart(2, '0')}`;
   }
 
-  let year, month, day;
-
-  // Shopify style: starts with 4-digit year (YYYY-MM-DD)
-  if (parts[0].length === 4) {
-    [year, month, day] = parts.map(Number);
-  }
-  // Sage style: MM/DD/YYYY (most common case)
-  else {
-    [month, day, year] = parts.map(Number);
+  // Fallback: let JS Date try to parse anything (unix, excel serial, etc.)
+  const parsed = new Date(cleaned);
+  if (!isNaN(parsed.getTime())) {
+    const y = parsed.getFullYear();
+    const m = String(parsed.getMonth() + 1).padStart(2, '0');
+    const d = String(parsed.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
   }
 
-  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  console.warn(`⚠️ Could not normalize date: "${dateStr}"`);
+  return cleaned; // last resort for weird date formats
 }
 
-function buildMatchingMaps(shopifyOpenOrders, sageOrders) {
+// ====================== LINE ITEM MATCHING HELPERS ======================
+function sageLineExistsInShopify(sageLine, shopifyLines) {
+  // v1 - for now, we're doing a simple match: either metafield custom.sageOrderNumber OR match my qty + line price
+  // future - can try to use SKU or product names for matching
 
-  // 1. Quick lookup: Sage Order Number → Shopify Order ID (from existing metafield)
+  // const sageSku = (sageLine.sku || '').trim().toUpperCase();
+  // const sageName = (sageLine.productName || '').trim().toLowerCase();
+
+  return shopifyLines.some(shLine => {
+    // const shSku = (shLine.lineSku || '').trim().toUpperCase();
+    // const shName = (shLine.lineName || '').trim().toLowerCase();
+
+    // const skuMatch = sageSku && shSku && sageSku === shSku;
+    // const nameMatch = sageName && shName && shName.includes(sageName) || sageName.includes(shName);
+
+    const qtyMatch = Math.abs(sageLine.quantity - shLine.lineQuantity) <= 0.01;
+    const priceMatch = Math.abs(sageLine.unitPrice - shLine.linePrice) <= 1;
+
+    // return (skuMatch || nameMatch) && qtyMatch && priceMatch;
+    return qtyMatch && priceMatch;
+  });
+}
+
+function allSageLinesAreInShopify(sageOrder, shopifyOrder) {
+  if (!sageOrder.productLineItems.length) return true; // edge case
+
+  return sageOrder.productLineItems.every(sageLine =>
+    sageLineExistsInShopify(sageLine, shopifyOrder.lineItems)
+  );
+}
+
+
+function buildMatchingMaps(shopifyOpenOrders, sageOrders) {
   const sageOrdersAlreadyInShopifyMap = {};
 
   Object.entries(shopifyOpenOrders).forEach(([shopifyId, order]) => {
     const sageNum = order.metaSageOrderNumber?.trim();
     if (sageNum) {
-      sageOrdersAlreadyInShopifyMap[sageNum] = shopifyId;   // key = Sage SO, value = Shopify ID
+      sageOrdersAlreadyInShopifyMap[sageNum] = shopifyId;
     }
   });
 
-  // 2. The two buckets we'll fill
-  const importableSageOrdersThatAlreadyExistInShopify = {};   // Sage SOs that already live in Shopify
-  const importableNewSageOrders = {};                        // Sage SOs that need to be created in Shopify
+  const importableSageOrdersThatAlreadyExistInShopify = {};
+  const importableNewSageOrders = {};
 
-  // 3. Main matching loop
   Object.entries(sageOrders).forEach(([soId, sageOrder]) => {
-    const sageOrderDateNorm = normalizeDate(sageOrder.orderDate || '');   // we'll add orderDate below
+    const sageDateNorm = normalizeDate(sageOrder.orderDate);
 
-    // PRIMARY MATCH: Already has metaSageOrderNumber in Shopify
+    // PRIMARY MATCH - metafield sage order number
     if (sageOrdersAlreadyInShopifyMap[soId]) {
       importableSageOrdersThatAlreadyExistInShopify[soId] = sageOrder;
       return;
     }
 
-
-    // SECONDARY MATCH: Fuzzy match on open Shopify orders
+    // SECONDARY MATCH - email + date + line item subset check
     let matched = false;
 
     for (const [shopifyId, shopifyOrder] of Object.entries(shopifyOpenOrders)) {
@@ -213,40 +246,22 @@ function buildMatchingMaps(shopifyOpenOrders, sageOrders) {
 
       const shopifyDateNorm = normalizeDate(shopifyOrder.processedAt);
 
-      // Condition A + B (email + date)
       if (
         shopifyEmail && sageEmail &&
         shopifyEmail === sageEmail &&
-        shopifyDateNorm && sageOrderDateNorm &&
-        shopifyDateNorm === sageOrderDateNorm
+        shopifyDateNorm && sageDateNorm &&
+        shopifyDateNorm === sageDateNorm
       ) {
 
-        // Condition C (line item sanity check)
-        const lineCountMatch = shopifyOrder.lineItems.length === sageOrder.productLineItems.length;
+        // Sage lines must be a subset of Shopify lines -- i.e. all Sage line items must be in the Shopify order
+        if (allSageLinesAreInShopify(sageOrder, shopifyOrder)) {
+          importableSageOrdersThatAlreadyExistInShopify[soId] = {
+            ...sageOrder,
+            shopifyOrderId: shopifyId,
+            shopifyOrderName: shopifyOrder.shopifyOrderName
+          };
 
-        let detailsMatch = true;
-        if (lineCountMatch && sageOrder.productLineItems.length > 0) {
-          // Simple qty + price check on first few items (can tighten later)
-          for (let i = 0; i < Math.min(3, sageOrder.productLineItems.length); i++) {
-            const sLine = sageOrder.productLineItems[i];
-            const shLine = shopifyOrder.lineItems[i];
-            if (
-              !shLine ||
-              Math.abs(sLine.quantity - shLine.lineQuantity) > 0.01 ||
-              Math.abs(sLine.unitPrice - shLine.linePrice) > 1   // $1 tolerance for rounding
-            ) {
-              detailsMatch = false;
-              break;
-            }
-          }
-        }
-
-        if (lineCountMatch && detailsMatch) {
-          importableSageOrdersThatAlreadyExistInShopify[soId] = { ...sageOrder, shopifyOrderId: shopifyId, shopifyOrderName: shopifyOrder.shopifyOrderName };
-
-          // Also update the map so we have the Shopify ID for later import
           sageOrdersAlreadyInShopifyMap[soId] = shopifyId;
-
           matched = true;
           break;
         }
@@ -321,8 +336,9 @@ function generateMatrixifyImportCSV(
     // Create one row per line item
     order.productLineItems.forEach((lineItem, index) => {
       const row = {
-        "ID": "",                                    // blank for new orders
+        "ID": "",                                    // blank for orders going into Shopify for the first time
         "Name": `S ${soId}`,                         // Sage-origin prefix
+        "Number": `${soId}`,                         // Sage-origin prefix
         "Command": "MERGE",
         "Processed At": formatShopifyDate(order.orderDate),
         "Closed At": "",
@@ -343,7 +359,7 @@ function generateMatrixifyImportCSV(
         "Metafield: custom.tracking_numbers": JSON.stringify(order.trackingNumbers || [])
       };
 
-      // Only put customer info on the first line item (Matrixify best practice)
+      // Put customer info & metafields on the first line item only (Matrixify best practice)
       if (index > 0) {
         row["Customer:Email"] = "";
         row["Customer: Phone"] = "";
@@ -372,6 +388,7 @@ function generateMatrixifyImportCSV(
         closedOrders.push({
           "ID": shopifyId,
           "Name": shopifyOrder.shopifyOrderName || '',
+          "Number": '',
           "Command": "MERGE",
           "Processed At": "",
           "Closed At": today,                    // This archives the order
