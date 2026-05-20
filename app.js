@@ -199,9 +199,10 @@ function buildMatchingMaps(shopifyOpenOrders, sageOrders) {
 
     // PRIMARY MATCH: Already has metaSageOrderNumber in Shopify
     if (sageOrdersAlreadyInShopifyMap[soId]) {
-      importableSageOrdersThatAlreadyExistInShopify[soId] = { ... sageOrder, shopifyOrderId: sageOrdersAlreadyInShopifyMap[soId] };
+      importableSageOrdersThatAlreadyExistInShopify[soId] = sageOrder;
       return;
     }
+
 
     // SECONDARY MATCH: Fuzzy match on open Shopify orders
     let matched = false;
@@ -229,9 +230,11 @@ function buildMatchingMaps(shopifyOpenOrders, sageOrders) {
           for (let i = 0; i < Math.min(3, sageOrder.productLineItems.length); i++) {
             const sLine = sageOrder.productLineItems[i];
             const shLine = shopifyOrder.lineItems[i];
-            if (!shLine ||
+            if (
+              !shLine ||
               Math.abs(sLine.quantity - shLine.lineQuantity) > 0.01 ||
-              Math.abs(sLine.unitPrice - shLine.linePrice) > 1) {   // $1 tolerance for rounding
+              Math.abs(sLine.unitPrice - shLine.linePrice) > 1   // $1 tolerance for rounding
+            ) {
               detailsMatch = false;
               break;
             }
@@ -320,7 +323,6 @@ function generateMatrixifyImportCSV(
       const row = {
         "ID": "",                                    // blank for new orders
         "Name": `S ${soId}`,                         // Sage-origin prefix
-        "Number": `S ${soId}`,                       // unique identifier for Matrixify (to group orders)
         "Command": "MERGE",
         "Processed At": formatShopifyDate(order.orderDate),
         "Closed At": "",
@@ -347,6 +349,10 @@ function generateMatrixifyImportCSV(
         row["Customer: Phone"] = "";
         row["Customer: First Name"] = "";
         row["Customer: Last Name"] = "";
+        row["Metafield: custom.sage_order_customer_number"] = "";
+        row["Metafield: custom.sage_order_number"] = "";
+        row["Metafield: custom.promise_dates"] = "";
+        row["Metafield: custom.tracking_numbers"] = "";
       }
 
       importRows.push(row);
@@ -366,7 +372,6 @@ function generateMatrixifyImportCSV(
         closedOrders.push({
           "ID": shopifyId,
           "Name": shopifyOrder.shopifyOrderName || '',
-          "Number": '',
           "Command": "MERGE",
           "Processed At": "",
           "Closed At": today,                    // This archives the order
