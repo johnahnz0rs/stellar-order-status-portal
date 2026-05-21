@@ -388,14 +388,24 @@ function generateMatrixifyImportCSV(
   sageOrdersAlreadyInShopifyMap,
   shopifyOpenOrders
 ) {
+
+  const sageOriginString = 'Sage-origin';
   const importRows = [];
-  const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+
+  // today in Pacific Time
+  const today = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(new Date()).replace(/\//g, '-');   // → YYYY-MM-DD
 
   // Helper to format date for Shopify
   function formatShopifyDate(dateStr) {
     if (!dateStr) return '';
     return normalizeDate(dateStr); // reuse our normalizer → YYYY-MM-DD
   }
+
 
   // 1. EXISTING ORDERS - Merge metafields
   Object.entries(importableSageOrdersThatAlreadyExistInShopify).forEach(([soId, sageOrder]) => {
@@ -416,7 +426,7 @@ function generateMatrixifyImportCSV(
       "Closed At": "",
       "Source": "",
       "Customer:Email": sageOrder.sageCustomerEmail || '',
-      "Customer: Phone": normalizePhone(order.sageCustomerPhone || ''),
+      "Customer: Phone": normalizePhone(sageOrder.sageCustomerPhone || ''),
       "Customer: First Name": "",
       "Customer: Last Name": "",
       "Line: Type": "Ignore",
@@ -446,7 +456,7 @@ function generateMatrixifyImportCSV(
         "Command": "MERGE",
         "Processed At": formatShopifyDate(order.orderDate),
         "Closed At": "",
-        "Source": "Sage-origin",
+        "Source": sageOriginString,
         "Customer:Email": order.sageCustomerEmail || '',
         "Customer: Phone": order.sageCustomerPhone || '',
         "Customer: First Name": firstName,
@@ -485,18 +495,23 @@ function generateMatrixifyImportCSV(
 
     // use merged metafields
     const shopifyOrder = shopifyOpenOrders[shopifyId]; // we have this from param
-    const existingPromiseDates = parseJsonMetafield(shopifyOrder?.metaPromiseDates);
-    const existingTracking = parseJsonMetafield(shopifyOrder?.metaTrackingNumbers);
-    const mergedPromiseDates = mergePromiseDates(existingPromiseDates, sageOrder.promiseDates || []);
-    const mergedTracking = mergeTrackingNumbers(existingTracking, sageOrder.trackingNumbers || []);
     const orderSource = shopifyOrder.orderSource.trim() || '';
+
+    const existingPromiseDates = parseJsonMetafield(shopifyOrder?.metaPromiseDates);
+    const mergedPromiseDates = mergePromiseDates(existingPromiseDates, []);
+
+    const existingTracking = parseJsonMetafield(shopifyOrder?.metaTrackingNumbers);
+    const mergedTracking = mergeTrackingNumbers(existingTracking, []);
 
 
     // If this order-that's-already-in-shopify is NOT in the "already exists"/updateable-importable bucket AND &&
     // also NOT in the "new"-importable bucket →
     // then this order should be closed
-    if (!importableSageOrdersThatAlreadyExistInShopify[sageSoId] &&
-      !importableNewSageOrders[sageSoId]) {
+    if (
+      !importableSageOrdersThatAlreadyExistInShopify[sageSoId] &&
+      !importableNewSageOrders[sageSoId] &&
+      shopifyOrder.orderSource === sageOriginString
+    ) {
 
       const shopifyOrder = shopifyOpenOrders[shopifyId];
       if (shopifyOrder) {
