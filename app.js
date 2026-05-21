@@ -426,7 +426,7 @@ function generateMatrixifyImportCSV(
       "Line: Price": "",
       "Metafield: custom.sage_order_number": soId,
       "Metafield: custom.promise_dates": JSON.stringify(mergedPromiseDates),
-      "Metafield: custom.tracking_numbers": JSON.stringify(mergedTracking)
+      "Metafield: custom.tracking_numbers": JSON.stringify(mergedTracking),
     });
   });
 
@@ -480,8 +480,16 @@ function generateMatrixifyImportCSV(
 
   // 3. CLOSED ORDERS (exist in Shopify but no longer in Sage)
   const closedOrders = [];
-
   Object.entries(sageOrdersAlreadyInShopifyMap).forEach(([sageSoId, shopifyId]) => {
+    const shopifyOrder = shopifyOpenOrders[shopifyId]; // we have this from param
+
+
+    const existingPromiseDates = parseJsonMetafield(shopifyOrder?.metaPromiseDates);
+    const existingTracking = parseJsonMetafield(shopifyOrder?.metaTrackingNumbers);
+
+    const mergedPromiseDates = mergePromiseDates(existingPromiseDates, sageOrder.promiseDates || []);
+    const mergedTracking = mergeTrackingNumbers(existingTracking, sageOrder.trackingNumbers || []);
+
     // If it's NOT in the "already exist" bucket AND NOT in the "new" bucket → it should be closed
     if (!importableSageOrdersThatAlreadyExistInShopify[sageSoId] &&
       !importableNewSageOrders[sageSoId]) {
@@ -500,15 +508,15 @@ function generateMatrixifyImportCSV(
           "Customer: Phone": "",
           "Customer: First Name": "",
           "Customer: Last Name": "",
-          "Line: Type": "",
+          "Line: Type": "Ignore",
           "Line: Command": "",
           "Line: Name": "",
           "Line: SKU": "",
           "Line: Quantity": "",
           "Line: Price": "",
-          "Metafield: custom.sage_order_number": "",
-          "Metafield: custom.promise_dates": "",
-          "Metafield: custom.tracking_numbers": ""
+          "Metafield: custom.sage_order_number": sageSoId,
+          "Metafield: custom.promise_dates": JSON.stringify(mergedPromiseDates),
+          "Metafield: custom.tracking_numbers": JSON.stringify(mergedTracking),
         });
       }
     }
