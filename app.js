@@ -22,6 +22,8 @@ function buildShopifyOpenOrders(shopifyRows) {
     if (!shopifyOpenOrders[id]) {
       shopifyOpenOrders[id] = {
         metaSageOrderNumber: row['Metafield: custom.sage_order_number [single_line_text_field]'] || '',
+        metaSagePromiseDates: row['Metafield: custom.sage_order_number [single_line_text_field]'] || '',
+        metaSageTrackingNumbers: row['Metafield: custom.sage_order_number [single_line_text_field]'] || '',
         shopifyOrderName: row['Name'] || '',
         email: row['Email'] || row['Customer: Email'] || '',
         phone: row['Phone'] || row['Customer: Phone'] || '',
@@ -33,7 +35,8 @@ function buildShopifyOpenOrders(shopifyRows) {
 
     const order = shopifyOpenOrders[id];
 
-    // Only Line Items; we don't need fulfillments, payments here
+
+    // Line Items (products) only, we don't need fulfillments, payments, etc here
     if (row['Line: Type'] === 'Line Item') {
       const line = {
         lineName: row['Line: Name'] || '',
@@ -46,10 +49,11 @@ function buildShopifyOpenOrders(shopifyRows) {
     }
   }
 
-  // Calculate totals after all lines are collected
+  // Calculate total of all line items, after all lines items are collected
   Object.values(shopifyOpenOrders).forEach(order => {
     order.totalOfLineItems = order.lineItems.reduce((sum, item) => sum + item.lineTotal, 0);
   });
+
   // console.log('*** these are the shopify open orders ***', shopifyOpenOrders);
   return shopifyOpenOrders;
 }
@@ -74,8 +78,12 @@ function buildSageCustomers(customerRows) {
       sageCustomerPhone: row['Telephone'] || '',
       origin
     };
+    // console.log('*** email adddresssesss ***', customerId, sageCustomers[customerId]);
   }
 
+
+  // console.log('*** buildSageCustomers() - these are the sage customers ***', sageCustomers);
+  console.log('*** buildSageCustomers() - these are the sage customers (count) ***', Object.keys(sageCustomers).length);
   return sageCustomers;
 }
 
@@ -98,7 +106,7 @@ function buildTrackingNumbers(trackingRows) {
       shipVia: row['Ship Via']?.trim() || ''
     });
   }
-  console.log('*** these are the tracking numbers ***', trackingNumbers);
+  // console.log('*** these are the tracking numbers ***', trackingNumbers);
   return trackingNumbers;
 }
 
@@ -145,7 +153,7 @@ function buildSageOrders(lineItemsRows, sageCustomers, trackingNumbers) {
     });
   }
 
-  // console.log('*** these are the sage orders ***', sageOrders);
+  console.log('*** these are the sage orders ***', sageOrders);
   return sageOrders;
 }
 
@@ -188,21 +196,21 @@ function sageLineExistsInShopify(sageLine, shopifyLines) {
   // v1 - for now, we're doing a simple match: either metafield custom.sageOrderNumber OR match my qty + line price
   // future - can try to use SKU or product names for matching
 
-  // const sageSku = (sageLine.sku || '').trim().toUpperCase();
-  // const sageName = (sageLine.productName || '').trim().toLowerCase();
+  const sageSku = (sageLine.sku || '').trim().toUpperCase();
+  const sageName = (sageLine.productName || '').trim().toLowerCase();
 
   return shopifyLines.some(shLine => {
-    // const shSku = (shLine.lineSku || '').trim().toUpperCase();
-    // const shName = (shLine.lineName || '').trim().toLowerCase();
+    const shSku = (shLine.lineSku || '').trim().toUpperCase();
+    const shName = (shLine.lineName || '').trim().toLowerCase();
 
-    // const skuMatch = sageSku && shSku && sageSku === shSku;
-    // const nameMatch = sageName && shName && shName.includes(sageName) || sageName.includes(shName);
+    const skuMatch = sageSku && shSku && sageSku === shSku;
+    const nameMatch = sageName && shName && shName.includes(sageName) || sageName.includes(shName);
 
     const qtyMatch = Math.abs(sageLine.quantity - shLine.lineQuantity) <= 0.01;
     const priceMatch = Math.abs(sageLine.unitPrice - shLine.linePrice) <= 1;
 
-    // return (skuMatch || nameMatch) && qtyMatch && priceMatch;
-    return qtyMatch && priceMatch;
+    return (skuMatch || nameMatch) && qtyMatch && priceMatch;
+    // return qtyMatch && priceMatch;
   });
 }
 
@@ -218,6 +226,7 @@ function allSageLinesAreInShopify(sageOrder, shopifyOrder) {
 function buildMatchingMaps(shopifyOpenOrders, sageOrders) {
   const sageOrdersAlreadyInShopifyMap = {};
 
+  // sageOrdersAlreadyInShopifyMap = input sageOrderNumber, receive shopify order id (long uid)
   Object.entries(shopifyOpenOrders).forEach(([shopifyId, order]) => {
     const sageNum = order.metaSageOrderNumber?.trim();
     if (sageNum) {
@@ -225,16 +234,18 @@ function buildMatchingMaps(shopifyOpenOrders, sageOrders) {
     }
   });
 
-  const importableSageOrdersThatAlreadyExistInShopify = {};
-  const importableNewSageOrders = {};
+  const importableSageOrdersThatAlreadyExistInShopify = {}; // just sage order metadata
+  const importableNewSageOrders = {}; // sage-origin orders that need to be created in shopify to display sage order metadata
 
   Object.entries(sageOrders).forEach(([soId, sageOrder]) => {
     const sageDateNorm = normalizeDate(sageOrder.orderDate);
+    // console.log('*** yeeehaw sageOrder ***', sageOrder);
 
     // PRIMARY MATCH - metafield sage order number
     if (sageOrdersAlreadyInShopifyMap[soId]) {
       importableSageOrdersThatAlreadyExistInShopify[soId] = sageOrder;
       importableSageOrdersThatAlreadyExistInShopify[soId].shopifyOrderId = sageOrdersAlreadyInShopifyMap[soId];
+
       return;
     }
 
@@ -254,12 +265,14 @@ function buildMatchingMaps(shopifyOpenOrders, sageOrders) {
         shopifyDateNorm === sageDateNorm
       ) {
 
-        // Sage lines must be a subset of Shopify lines -- i.e. all Sage line items must be in the Shopify order
+        // i.e. all Sage line items must also be in the Shopify order to be considered a match
         if (allSageLinesAreInShopify(sageOrder, shopifyOrder)) {
           importableSageOrdersThatAlreadyExistInShopify[soId] = {
             ...sageOrder,
             shopifyOrderId: shopifyId,
-            shopifyOrderName: shopifyOrder.shopifyOrderName
+            shopifyOrderName: shopifyOrder.shopifyOrderName,
+            customerEmail: sageEmail,
+
           };
 
           sageOrdersAlreadyInShopifyMap[soId] = shopifyId;
@@ -271,6 +284,7 @@ function buildMatchingMaps(shopifyOpenOrders, sageOrders) {
 
     if (!matched) {
       importableNewSageOrders[soId] = sageOrder;
+      // importableNewSageOrders[soId].customerEmail = sageEmail;
     }
   });
 
@@ -316,7 +330,7 @@ function generateMatrixifyImportCSV(
       "Customer: Phone": "",
       "Customer: First Name": "",
       "Customer: Last Name": "",
-      "Line: Type": "",
+      "Line: Type": "Ignore",
       "Line: Command": "",
       "Line: Name": "",
       "Line: SKU": "",
@@ -441,7 +455,8 @@ function generateAndDownloadCSV(matrixifyRows) {
 
   // Create blob and trigger download
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const fileName = `Stellar_Orders_Import_${new Date().toISOString().slice(0,10)}.csv`;
+  // const fileName = `Stellar_Orders_Import_${new Date().toISOString().slice(0,10)}.csv`;
+  const fileName = `Stellar_Orders_Import_${new Date().toISOString()}.csv`;
 
   // Modern way (works in all current browsers)
   const link = document.createElement('a');
@@ -473,28 +488,39 @@ function previewMatrixifyRows(matrixifyRows, maxRows = 10) {
 
 // ====================== MAIN PROCESSOR ======================
 async function processAllFiles(shopifyFile, sageCustomersFile, sageTrackingFile, sageLinesFile) {
-  console.log('🚀 Starting CSV processing...');
+  console.log('*** processAllFiles() -- 🚀 Starting: create a shopify/matrixify importable CSV ***');
 
-  const [shopifyRows, customerRows, trackingRows, lineItemsRows] = await Promise.all([
+  // read all the uploaded files/csv's
+  const [
+    shopifyRows,
+    customerRows,
+    trackingRows,
+    lineItemsRows
+  ] = await Promise.all([
     parseCSV(shopifyFile),
     parseCSV(sageCustomersFile),
     parseCSV(sageTrackingFile),
     parseCSV(sageLinesFile)
   ]);
 
-  // Build in correct dependency order
-  const shopifyOpenOrders = buildShopifyOpenOrders(shopifyRows);
-  const sageCustomersMap = buildSageCustomers(customerRows);
+
+  // Build iterable js objects, in the correct dependency order, i.e. keep this block in the same order
+  const shopifyOpenOrders = buildShopifyOpenOrders(shopifyRows); // shopifyOpenOrders = shopify data about the order, including sage metadata if available
+  const sageCustomersMap = buildSageCustomers(customerRows); // sageCustomersMap = input sage customer id, receive customer email, etc
   const trackingMap = buildTrackingNumbers(trackingRows);
   const sageOrders = buildSageOrders(lineItemsRows, sageCustomersMap, trackingMap);
-
   console.log('✅ Processing complete!');
   console.log(`Shopify Open Orders: ${Object.keys(shopifyOpenOrders).length}`);
   console.log(`Sage Customers: ${Object.keys(sageCustomersMap).length}`);
   console.log(`Sage Orders: ${Object.keys(sageOrders).length}`);
 
 
-  // === MATCHING ===
+  // === MATCHING === sort out whether
+  // matchingResult = {
+  //     sageOrdersAlreadyInShopifyMap, // input sageOrderNumber, receive shopify order id (long uid)
+  //     importableSageOrdersThatAlreadyExistInShopify,
+  //     importableNewSageOrders
+  //   };
   const matchingResult = buildMatchingMaps(shopifyOpenOrders, sageOrders);
 
 
@@ -526,6 +552,7 @@ async function processAllFiles(shopifyFile, sageCustomersFile, sageTrackingFile,
 // ====================== UI GLUE + ENHANCEMENTS ======================
 let lastMatrixifyRows = [];
 
+// onclick="processAll"
 async function processAll() {
   const statusEl = document.getElementById('status');
   const previewEl = document.getElementById('preview');
