@@ -141,7 +141,8 @@ function buildShopifyOpenOrders(shopifyRows) {
         phone: row['Phone'] || row['Customer: Phone'] || '',
         processedAt: row['Processed At'] || '',
         lineItems: [],
-        totalOfLineItems: 0
+        totalOfLineItems: 0,
+        orderSource: row['Source'],
       };
     }
 
@@ -445,7 +446,7 @@ function generateMatrixifyImportCSV(
         "Command": "MERGE",
         "Processed At": formatShopifyDate(order.orderDate),
         "Closed At": "",
-        "Source": "Sage-origin order",
+        "Source": "Sage-origin",
         "Customer:Email": order.sageCustomerEmail || '',
         "Customer: Phone": order.sageCustomerPhone || '',
         "Customer: First Name": firstName,
@@ -481,16 +482,19 @@ function generateMatrixifyImportCSV(
   // 3. CLOSED ORDERS (exist in Shopify but no longer in Sage)
   const closedOrders = [];
   Object.entries(sageOrdersAlreadyInShopifyMap).forEach(([sageSoId, shopifyId]) => {
+
+    // use merged metafields
     const shopifyOrder = shopifyOpenOrders[shopifyId]; // we have this from param
-
-
     const existingPromiseDates = parseJsonMetafield(shopifyOrder?.metaPromiseDates);
     const existingTracking = parseJsonMetafield(shopifyOrder?.metaTrackingNumbers);
-
     const mergedPromiseDates = mergePromiseDates(existingPromiseDates, sageOrder.promiseDates || []);
     const mergedTracking = mergeTrackingNumbers(existingTracking, sageOrder.trackingNumbers || []);
+    const orderSource = shopifyOrder.orderSource.trim() || '';
 
-    // If it's NOT in the "already exist" bucket AND NOT in the "new" bucket → it should be closed
+
+    // If this order-that's-already-in-shopify is NOT in the "already exists"/updateable-importable bucket AND &&
+    // also NOT in the "new"-importable bucket →
+    // then this order should be closed
     if (!importableSageOrdersThatAlreadyExistInShopify[sageSoId] &&
       !importableNewSageOrders[sageSoId]) {
 
@@ -503,7 +507,7 @@ function generateMatrixifyImportCSV(
           "Command": "MERGE",
           "Processed At": "",
           "Closed At": today,                    // This archives the order
-          "Source": "",
+          "Source": orderSource,
           "Customer:Email": "",
           "Customer: Phone": "",
           "Customer: First Name": "",
@@ -515,8 +519,8 @@ function generateMatrixifyImportCSV(
           "Line: Quantity": "",
           "Line: Price": "",
           "Metafield: custom.sage_order_number": sageSoId,
-          "Metafield: custom.promise_dates": JSON.stringify(mergedPromiseDates),
-          "Metafield: custom.tracking_numbers": JSON.stringify(mergedTracking),
+          "Metafield: custom.promise_dates": JSON.stringify(mergedPromiseDates), // retain metadata for customer history
+          "Metafield: custom.tracking_numbers": JSON.stringify(mergedTracking), // retain metadata for customer history
         });
       }
     }
