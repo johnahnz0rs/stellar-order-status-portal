@@ -1,4 +1,4 @@
-// ====================== CSV PROCESSING HELPERS ======================
+// ====================== HELPERS ======================
 async function parseCSV(file) {
   return new Promise((resolve, reject) => {
     Papa.parse(file, {
@@ -10,20 +10,100 @@ async function parseCSV(file) {
     });
   });
 }
+function normalizeDate(dateStr) {
+  if (!dateStr) return '';
 
-// ====================== 1. SHOPIFY OPEN ORDERS ======================
+  const cleaned = dateStr.toString().trim();
+
+  // Try direct YYYY-MM-DD or MM/DD/YYYY patterns first
+  let match = cleaned.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/) ||
+    cleaned.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+
+  if (match) {
+    let [_, y1, m1, d1] = match.map(Number);
+    // Swap if MM/DD/YYYY
+    if (y1 > 31) { // year first
+      [y1, m1, d1] = [y1, m1, d1];
+    } else {
+      [m1, d1, y1] = [y1, m1, d1]; // assume MM/DD/YYYY
+    }
+    return `${y1}-${String(m1).padStart(2, '0')}-${String(d1).padStart(2, '0')}`;
+  }
+
+  // Fallback: let JS Date try to parse anything (unix, excel serial, etc.)
+  const parsed = new Date(cleaned);
+  if (!isNaN(parsed.getTime())) {
+    const y = parsed.getFullYear();
+    const m = String(parsed.getMonth() + 1).padStart(2, '0');
+    const d = String(parsed.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  console.warn(`⚠️ Could not normalize date: "${dateStr}"`);
+  return cleaned; // last resort for weird date formats
+}
+// ====================== METAFIELD MERGE HELPERS ======================
+function parseJsonMetafield(value) {
+  if (!value) return [];
+  try {
+    // Handle both stringified JSON and already-parsed
+    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    console.warn('⚠️ Failed to parse metafield JSON:', value);
+    return [];
+  }
+}
+function mergePromiseDates(existing, incoming) {
+  const map = new Map(); // key is `productName|quantity|promiseDate` -- trying to keep as many unique line items/promise dates as possible
+
+  // Existing first (preserve Shopify history)
+  for (const item of existing) {
+    const key = `${(item.productName || '').trim()}|${item.quantity || 0}|${(item.promiseDate || '').trim()}`;
+    map.set(key, { ...item });
+  }
+
+  // Fresh Sage data wins on conflicts - overwrite with sage data if identical
+  for (const item of incoming) {
+    const key = `${(item.productName || '').trim()}|${item.quantity || 0}|${(item.promiseDate || '').trim()}`;
+    map.set(key, { ...item });
+  }
+
+  const merged = Array.from(map.values());
+
+  console.log(`🔄 Merged promise dates: ${existing.length} existing + ${incoming.length} incoming → ${merged.length} unique`);
+  return merged;
+}
+function mergeTrackingNumbers(existing, incoming) {
+  const map = new Map();
+
+  for (const t of existing) {
+    const key = (t.trackingId || '').trim() || JSON.stringify(t);
+    map.set(key, { ...t });
+  }
+  for (const t of incoming) {
+    const key = (t.trackingId || '').trim() || JSON.stringify(t);
+    map.set(key, { ...t });
+  }
+
+  return Array.from(map.values());
+}
+
+
+
+// 1. SHOPIFY OPEN ORDERS
 function buildShopifyOpenOrders(shopifyRows) {
   const shopifyOpenOrders = {};
 
   for (const row of shopifyRows) {
-    const id = parseInt(row['ID']);
+    const id = parseInt(row['ID']); // shopify orders' "ID" is an auto-generated uid integer
     if (!id) continue;
 
     if (!shopifyOpenOrders[id]) {
       shopifyOpenOrders[id] = {
         metaSageOrderNumber: row['Metafield: custom.sage_order_number [single_line_text_field]'] || '',
-        metaSagePromiseDates: row['Metafield: custom.sage_order_number [single_line_text_field]'] || '',
-        metaSageTrackingNumbers: row['Metafield: custom.sage_order_number [single_line_text_field]'] || '',
+        metaSagePromiseDates: row['Metafield: custom.promise_dates [json]'] || '',
+        metaSageTrackingNumbers: row['Metafield: custom.tracking_numbers [json]'] || '',
         shopifyOrderName: row['Name'] || '',
         email: row['Email'] || row['Customer: Email'] || '',
         phone: row['Phone'] || row['Customer: Phone'] || '',
@@ -57,8 +137,7 @@ function buildShopifyOpenOrders(shopifyRows) {
   // console.log('*** these are the shopify open orders ***', shopifyOpenOrders);
   return shopifyOpenOrders;
 }
-
-// ====================== 2. SAGE CUSTOMERS ======================
+// 2. SAGE CUSTOMERS
 function buildSageCustomers(customerRows) {
   const sageCustomers = {};
 
@@ -86,8 +165,7 @@ function buildSageCustomers(customerRows) {
   console.log('*** buildSageCustomers() - these are the sage customers (count) ***', Object.keys(sageCustomers).length);
   return sageCustomers;
 }
-
-// ====================== 3. TRACKING NUMBERS ======================
+// 3. TRACKING NUMBERS
 function buildTrackingNumbers(trackingRows) {
   const trackingNumbers = {};
 
@@ -109,8 +187,7 @@ function buildTrackingNumbers(trackingRows) {
   // console.log('*** these are the tracking numbers ***', trackingNumbers);
   return trackingNumbers;
 }
-
-// ====================== 4. SAGE ORDERS (depends on previous) ======================
+// 4. SAGE ORDERS -- depends on previous, i.e. this must be done in order, after buildTrackingNumbers()
 function buildSageOrders(lineItemsRows, sageCustomers, trackingNumbers) {
   const sageOrders = {};
 
@@ -130,7 +207,7 @@ function buildSageOrders(lineItemsRows, sageCustomers, trackingNumbers) {
         orderDate: row['Order Date']?.trim() || '',
         productLineItems: [],
         promiseDates: [],
-        trackingNumbers: trackingNumbers[soId] || []
+        trackingNumbers: trackingNumbers[soId] || '',
       };
     }
 
@@ -157,41 +234,7 @@ function buildSageOrders(lineItemsRows, sageCustomers, trackingNumbers) {
   return sageOrders;
 }
 
-// ====================== MATCHING LOGIC ======================
-function normalizeDate(dateStr) {
-  if (!dateStr) return '';
-
-  const cleaned = dateStr.toString().trim();
-
-  // Try direct YYYY-MM-DD or MM/DD/YYYY patterns first
-  let match = cleaned.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/) ||
-    cleaned.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
-
-  if (match) {
-    let [_, y1, m1, d1] = match.map(Number);
-    // Swap if MM/DD/YYYY
-    if (y1 > 31) { // year first
-      [y1, m1, d1] = [y1, m1, d1];
-    } else {
-      [m1, d1, y1] = [y1, m1, d1]; // assume MM/DD/YYYY
-    }
-    return `${y1}-${String(m1).padStart(2, '0')}-${String(d1).padStart(2, '0')}`;
-  }
-
-  // Fallback: let JS Date try to parse anything (unix, excel serial, etc.)
-  const parsed = new Date(cleaned);
-  if (!isNaN(parsed.getTime())) {
-    const y = parsed.getFullYear();
-    const m = String(parsed.getMonth() + 1).padStart(2, '0');
-    const d = String(parsed.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  }
-
-  console.warn(`⚠️ Could not normalize date: "${dateStr}"`);
-  return cleaned; // last resort for weird date formats
-}
-
-// ====================== LINE ITEM MATCHING HELPERS ======================
+// MATCHING HELPERS - help figure out if/does this sage order (that needs to go into shopify) already have a corresponding order in shopify?
 function sageLineExistsInShopify(sageLine, shopifyLines) {
   // v1 - for now, we're doing a simple match: either metafield custom.sageOrderNumber OR match my qty + line price
   // future - can try to use SKU or product names for matching
@@ -213,7 +256,6 @@ function sageLineExistsInShopify(sageLine, shopifyLines) {
     // return qtyMatch && priceMatch;
   });
 }
-
 function allSageLinesAreInShopify(sageOrder, shopifyOrder) {
   if (!sageOrder.productLineItems.length) return true; // edge case
 
@@ -223,10 +265,15 @@ function allSageLinesAreInShopify(sageOrder, shopifyOrder) {
 }
 
 
+// buildMatchingMaps() RETURNS:
+//   sageOrdersAlreadyInShopifyMap - input sageOrderNumber, receive shopify order id (long uid)
+//   importableSageOrdersThatAlreadyExistInShopify, // just sage order metadata
+//   importableNewSageOrders // sage-origin orders that need to be created in shopify to display sage order metadata
 function buildMatchingMaps(shopifyOpenOrders, sageOrders) {
+
   const sageOrdersAlreadyInShopifyMap = {};
 
-  // sageOrdersAlreadyInShopifyMap = input sageOrderNumber, receive shopify order id (long uid)
+  // create sageOrdersAlreadyInShopifyMap
   Object.entries(shopifyOpenOrders).forEach(([shopifyId, order]) => {
     const sageNum = order.metaSageOrderNumber?.trim();
     if (sageNum) {
@@ -234,18 +281,16 @@ function buildMatchingMaps(shopifyOpenOrders, sageOrders) {
     }
   });
 
-  const importableSageOrdersThatAlreadyExistInShopify = {}; // just sage order metadata
-  const importableNewSageOrders = {}; // sage-origin orders that need to be created in shopify to display sage order metadata
-
+  // create importableSageOrdersThatAlreadyExistInShopify, importableNewSageOrders
+  const importableSageOrdersThatAlreadyExistInShopify = {};
+  const importableNewSageOrders = {};
   Object.entries(sageOrders).forEach(([soId, sageOrder]) => {
     const sageDateNorm = normalizeDate(sageOrder.orderDate);
-    // console.log('*** yeeehaw sageOrder ***', sageOrder);
 
     // PRIMARY MATCH - metafield sage order number
     if (sageOrdersAlreadyInShopifyMap[soId]) {
       importableSageOrdersThatAlreadyExistInShopify[soId] = sageOrder;
       importableSageOrdersThatAlreadyExistInShopify[soId].shopifyOrderId = sageOrdersAlreadyInShopifyMap[soId];
-
       return;
     }
 
@@ -300,7 +345,10 @@ function buildMatchingMaps(shopifyOpenOrders, sageOrders) {
 }
 
 
-// ====================== MATRIXIFY IMPORT CSV GENERATOR ======================
+
+
+
+// GENERATE MATRIXIFY-IMPORTABLE CSV
 function generateMatrixifyImportCSV(
   importableSageOrdersThatAlreadyExistInShopify,
   importableNewSageOrders,
@@ -316,17 +364,25 @@ function generateMatrixifyImportCSV(
     return normalizeDate(dateStr); // reuse our normalizer → YYYY-MM-DD
   }
 
-  // 1. EXISTING ORDERS - Just update metafields (MERGE)
-  Object.entries(importableSageOrdersThatAlreadyExistInShopify).forEach(([soId, order]) => {
+  // 1. EXISTING ORDERS - Merge metafields
+  Object.entries(importableSageOrdersThatAlreadyExistInShopify).forEach(([soId, sageOrder]) => {
+    const shopifyOrder = shopifyOpenOrders[sageOrder.shopifyOrderId]; // we have this from param
+
+    const existingPromiseDates = parseJsonMetafield(shopifyOrder?.metaPromiseDates);
+    const existingTracking = parseJsonMetafield(shopifyOrder?.metaTrackingNumbers);
+
+    const mergedPromiseDates = mergePromiseDates(existingPromiseDates, sageOrder.promiseDates || []);
+    const mergedTracking = mergeTrackingNumbers(existingTracking, sageOrder.trackingNumbers || []);
+
     importRows.push({
-      "ID": order.shopifyOrderId || '',
-      "Name": order.shopifyOrderName || '',
+      "ID": sageOrder.shopifyOrderId || '',
+      "Name": sageOrder.shopifyOrderName || '',
       "Number": '',
       "Command": "MERGE",
-      "Processed At": formatShopifyDate(order.orderDate),
+      "Processed At": formatShopifyDate(sageOrder.orderDate),
       "Closed At": "",
       "Source": "",
-      "Customer:Email": order.sageCustomerEmail || '',
+      "Customer:Email": sageOrder.sageCustomerEmail || '',
       "Customer: Phone": "",
       "Customer: First Name": "",
       "Customer: Last Name": "",
@@ -337,8 +393,8 @@ function generateMatrixifyImportCSV(
       "Line: Quantity": "",
       "Line: Price": "",
       "Metafield: custom.sage_order_number": soId,
-      "Metafield: custom.promise_dates": JSON.stringify(order.promiseDates || []),
-      "Metafield: custom.tracking_numbers": JSON.stringify(order.trackingNumbers || [])
+      "Metafield: custom.promise_dates": JSON.stringify(mergedPromiseDates),
+      "Metafield: custom.tracking_numbers": JSON.stringify(mergedTracking)
     });
   });
 
@@ -435,10 +491,7 @@ function generateMatrixifyImportCSV(
 
   return importRows;
 }
-
-
-// ====================== DOWNLOAD & PREVIEW HELPERS ======================
-
+// DOWNLOAD & PREVIEW THE MATRIXIFY-IMPORTABLE CSV
 function generateAndDownloadCSV(matrixifyRows) {
   if (!matrixifyRows || matrixifyRows.length === 0) {
     console.error("No rows to export");
@@ -471,7 +524,6 @@ function generateAndDownloadCSV(matrixifyRows) {
   console.log(`✅ Downloaded ${matrixifyRows.length} rows as ${fileName}`);
   return csvContent; // also return string if you want to preview
 }
-
 function previewMatrixifyRows(matrixifyRows, maxRows = 10) {
   console.log(`\n=== MATRIXIFY PREVIEW (first ${maxRows} rows) ===`);
   const preview = matrixifyRows.slice(0, maxRows);
@@ -515,7 +567,12 @@ async function processAllFiles(shopifyFile, sageCustomersFile, sageTrackingFile,
   console.log(`Sage Orders: ${Object.keys(sageOrders).length}`);
 
 
-  // === MATCHING === sort out whether
+  // === MATCHING ===
+  // returns 3 types of objects to use in the creation of the matrixify-importable csv:
+  //   (1) sage->shopify order id converter,
+  //   (2) shopify orders (any-origin) that already have sage metadata,
+  //   (3) sage-origin orders that need to be created in shopify
+  //
   // matchingResult = {
   //     sageOrdersAlreadyInShopifyMap, // input sageOrderNumber, receive shopify order id (long uid)
   //     importableSageOrdersThatAlreadyExistInShopify,
@@ -524,13 +581,14 @@ async function processAllFiles(shopifyFile, sageCustomersFile, sageTrackingFile,
   const matchingResult = buildMatchingMaps(shopifyOpenOrders, sageOrders);
 
 
-  // === GENERATE MATRIXIFY IMPORT ===
+  // === GENERATE MATRIXIFY-IMPORTABLE CSV ===
   const matrixifyRows = generateMatrixifyImportCSV(
     matchingResult.importableSageOrdersThatAlreadyExistInShopify,
     matchingResult.importableNewSageOrders,
     matchingResult.sageOrdersAlreadyInShopifyMap,
     shopifyOpenOrders
   );
+
 
   // === PREVIEW + AUTO DOWNLOAD (for now) ===
   previewMatrixifyRows(matrixifyRows);
