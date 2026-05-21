@@ -42,6 +42,38 @@ function normalizeDate(dateStr) {
   console.warn(`⚠️ Could not normalize date: "${dateStr}"`);
   return cleaned; // last resort for weird date formats
 }
+function normalizePhone(phoneStr) {
+  if (!phoneStr) return '';
+
+  let cleaned = phoneStr.toString().trim();
+  if (!cleaned) return '';
+
+  // Keep + and extract digits
+  const hasPlus = cleaned.includes('+');
+  const digitsOnly = cleaned.replace(/\D/g, '');
+
+  if (!digitsOnly) return cleaned; // rare edge case
+
+  // Case 1: Already has country code (international or explicit +1 / 1-)
+  if (hasPlus || cleaned.startsWith('1-') || cleaned.startsWith('00') || digitsOnly.length > 10) {
+    if (hasPlus) {
+      // Preserve the + and remove other separators
+      return cleaned.replace(/[\s()-]/g, '');
+    }
+    return '+' + digitsOnly;
+  }
+
+  // Case 2: No country code → assume US (+1)
+  if (digitsOnly.length === 11 && digitsOnly.startsWith('1')) {
+    return '+' + digitsOnly;
+  }
+  if (digitsOnly.length === 10) {
+    return '+1' + digitsOnly;
+  }
+
+  // Fallback: try to make it E.164
+  return '+1' + digitsOnly;
+}
 // ====================== METAFIELD MERGE HELPERS ======================
 function parseJsonMetafield(value) {
   if (!value) return [];
@@ -154,7 +186,7 @@ function buildSageCustomers(customerRows) {
     sageCustomers[customerId] = {
       email,
       sageCustomerName: row['Name'] || '',
-      sageCustomerPhone: row['Telephone'] || '',
+      sageCustomerPhone: normalizePhone(row['Telephone'] || ''),
       origin
     };
     // console.log('*** email adddresssesss ***', customerId, sageCustomers[customerId]);
@@ -383,7 +415,7 @@ function generateMatrixifyImportCSV(
       "Closed At": "",
       "Source": "",
       "Customer:Email": sageOrder.sageCustomerEmail || '',
-      "Customer: Phone": "",
+      "Customer: Phone": normalizePhone(order.sageCustomerPhone || ''),
       "Customer: First Name": "",
       "Customer: Last Name": "",
       "Line: Type": "Ignore",
