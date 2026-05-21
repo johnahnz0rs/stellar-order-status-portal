@@ -59,7 +59,7 @@ function buildSageCustomers(customerRows) {
   const sageCustomers = {};
 
   for (const row of customerRows) {
-    const customerId = parseInt(row['Customer']?.trim());
+    const customerId = row['Customer']?.trim();
     if (!customerId) continue;
 
     const email = (row['E-mail Address'] || '').trim();
