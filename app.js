@@ -168,6 +168,8 @@ function buildShopifyOpenOrders(shopifyRows) {
         metaSageOrderNumber: row['Metafield: custom.sage_order_number [single_line_text_field]'] || '',
         metaSagePromiseDates: row['Metafield: custom.promise_dates [json]'] || '',
         metaSageTrackingNumbers: row['Metafield: custom.tracking_numbers [json]'] || '',
+        metaSageCustomerNumber: row['Metafield: custom.sage_order_customer_number [single_line_text_field]'] || '',
+        metaSageCustomerPONumber: row['Metafield: custom.sage_order_customer_po_number [single_line_text_field]'] || '',
         shopifyOrderName: row['Name'] || '',
         email: row['Email'] || row['Customer: Email'] || '',
         phone: row['Phone'] || row['Customer: Phone'] || '',
@@ -256,17 +258,18 @@ function buildSageOrders(lineItemsRows, sageCustomers, trackingNumbers) {
 
     if (!sageOrders[soId]) {
       const custNumber = row['Customer Number']?.trim() || '';
-      const custInfo = sageCustomers[custNumber] || { email: '' };
+      const custInfo = sageCustomers[custNumber];
 
       sageOrders[soId] = {
         sageCustomerNumber: custNumber,
+        sageCustomerPONumber: (row['Customer PO Number'] || '').trim(),
         sageCustomerEmail: custInfo.email || '',
         sageCustomerName: custInfo.sageCustomerName || '',
         sageCustomerPhone: custInfo.sageCustomerPhone || '',
         orderDate: row['Order Date']?.trim() || '',
         productLineItems: [],
         promiseDates: [],
-        trackingNumbers: trackingNumbers[soId] || '',
+        trackingNumbers: trackingNumbers[soId] || [],
       };
     }
 
@@ -415,11 +418,11 @@ function generateMatrixifyImportCSV(
       "Name": sageOrder.shopifyOrderName || '',
       "Number": '',
       "Command": "MERGE",
-      "Processed At": formatShopifyDate(sageOrder.orderDate),
+      "Processed At": "",
       "Closed At": "",
       "Source": "",
       "Customer:Email": sageOrder.sageCustomerEmail || '',
-      "Customer: Phone": normalizePhone(sageOrder.sageCustomerPhone || ''),
+      "Customer: Phone": "",
       "Customer: First Name": "",
       "Customer: Last Name": "",
       "Line: Type": "Ignore",
@@ -431,6 +434,8 @@ function generateMatrixifyImportCSV(
       "Metafield: custom.sage_order_number": soId,
       "Metafield: custom.promise_dates": JSON.stringify(mergedPromiseDates),
       "Metafield: custom.tracking_numbers": JSON.stringify(mergedTracking),
+      "Metafield: custom.sage_order_customer_number": sageOrder.sageCustomerNumber || '',
+      "Metafield: custom.sage_order_customer_po_number": sageOrder.sageCustomerPONumber || '',
     });
   });
 
@@ -460,10 +465,11 @@ function generateMatrixifyImportCSV(
         "Line: SKU": lineItem.sku || '',
         "Line: Quantity": lineItem.quantity || '',
         "Line: Price": lineItem.unitPrice || '',
-        "Metafield: custom.sage_order_customer_number": order.sageCustomerNumber || '',
         "Metafield: custom.sage_order_number": soId,
         "Metafield: custom.promise_dates": JSON.stringify(order.promiseDates || []),
-        "Metafield: custom.tracking_numbers": JSON.stringify(order.trackingNumbers || [])
+        "Metafield: custom.tracking_numbers": JSON.stringify(order.trackingNumbers || []),
+        "Metafield: custom.sage_order_customer_number": order.sageCustomerNumber || '',
+        "Metafield: custom.sage_order_customer_po_number": order.sageCustomerPONumber || '',
       };
 
       // Put customer info & metafields on the first line item only (Matrixify best practice)
@@ -472,10 +478,12 @@ function generateMatrixifyImportCSV(
         row["Customer: Phone"] = "";
         row["Customer: First Name"] = "";
         row["Customer: Last Name"] = "";
-        row["Metafield: custom.sage_order_customer_number"] = "";
         row["Metafield: custom.sage_order_number"] = "";
         row["Metafield: custom.promise_dates"] = "";
         row["Metafield: custom.tracking_numbers"] = "";
+        row["Metafield: custom.tracking_po_numbers"] = "";
+        row["Metafield: custom.sage_order_customer_number"] = "";
+        row["Metafield: custom.sage_order_customer_po_number"] = "";
       }
 
       importRows.push(row);
