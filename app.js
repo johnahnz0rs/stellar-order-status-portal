@@ -635,8 +635,8 @@ function generateMatrixifyImportCSV(
       "Line: Quantity": "",
       "Line: Price": "",
       "Metafield: custom.sage_order_number": soId,
-      "Metafield: custom.promise_dates": JSON.stringify(mergedPromiseDates),
-      "Metafield: custom.tracking_numbers": JSON.stringify(mergedTracking),
+      "Metafield: custom.promise_dates": mergedPromiseDates.length ? JSON.stringify(mergedPromiseDates) : '',
+      "Metafield: custom.tracking_numbers": mergedTracking.length ? JSON.stringify(mergedTracking) : '',
       "Metafield: custom.sage_order_customer_number": sageOrder.sageCustomerNumber || '',
       "Metafield: custom.sage_order_customer_po_number": sageOrder.sageCustomerPONumber || '',
     });
@@ -669,8 +669,8 @@ function generateMatrixifyImportCSV(
         "Line: Quantity": lineItem.quantity || '',
         "Line: Price": lineItem.unitPrice || '',
         "Metafield: custom.sage_order_number": soId,
-        "Metafield: custom.promise_dates": JSON.stringify(order.promiseDates || []),
-        "Metafield: custom.tracking_numbers": JSON.stringify(order.trackingNumbers || []),
+        "Metafield: custom.promise_dates": order.promiseDates.length ? JSON.stringify(order.promiseDates) : '',
+        "Metafield: custom.tracking_numbers": order.trackingNumbers.length ? JSON.stringify(order.trackingNumbers) : '',
         "Metafield: custom.sage_order_customer_number": order.sageCustomerNumber || '',
         "Metafield: custom.sage_order_customer_po_number": order.sageCustomerPONumber || '',
       };
@@ -684,7 +684,6 @@ function generateMatrixifyImportCSV(
         row["Metafield: custom.sage_order_number"] = "";
         row["Metafield: custom.promise_dates"] = "";
         row["Metafield: custom.tracking_numbers"] = "";
-        row["Metafield: custom.tracking_po_numbers"] = "";
         row["Metafield: custom.sage_order_customer_number"] = "";
         row["Metafield: custom.sage_order_customer_po_number"] = "";
       }
